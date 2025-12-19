@@ -21,6 +21,7 @@ local coinHolder = workspace:WaitForChild("Gameplay"):WaitForChild("CoinHolder")
 local customers = workspace:WaitForChild("Gameplay"):WaitForChild("Customers")
 local containerHolder = plot:WaitForChild("PlotLogic"):WaitForChild("ContainerHolder")
 local itemCache = plot.PlotLogic.ItemCache
+local containerCacheNames = {"ContainerItemCache", "ContainerPickupCache"}
 
 local containerMap = {
     ["JunkContainer"] = string.char(13) .. "JunkContainer",
@@ -265,6 +266,50 @@ Container:CreateToggle({
                 remote:FireServer(buffer.fromstring("K"), buffer.fromstring("\254\1\0\6." .. container.Name))
             end
             task.wait()
+        end
+    end,
+})
+
+local function tryPickupContainerItem(item)
+    if not item or not item:IsA("Model") or not item.PrimaryPart then
+        return
+    end
+
+    if string.sub(item.Name, 1, 5) ~= "ITEM_" then
+        return
+    end
+
+    remote:FireServer(buffer.fromstring("\v"), buffer.fromstring("\254\1\0\6)" .. item.Name))
+end
+
+Container:CreateToggle({
+    Name = "Container Item Pickup",
+    CurrentValue = false,
+    Callback = function(Value)
+        if not containerHolder then
+            error("watafak no container folder")
+            return
+        end
+
+        _G.containeritems = Value
+
+        while _G.containeritems do
+            for _, container in ipairs(containerHolder:GetChildren()) do
+                for _, item in ipairs(container:GetDescendants()) do
+                    tryPickupContainerItem(item)
+                end
+            end
+
+            for _, cacheName in ipairs(containerCacheNames) do
+                local cache = plot.PlotLogic:FindFirstChild(cacheName)
+                if cache then
+                    for _, item in ipairs(cache:GetChildren()) do
+                        tryPickupContainerItem(item)
+                    end
+                end
+            end
+
+            task.wait(0.15)
         end
     end,
 })
