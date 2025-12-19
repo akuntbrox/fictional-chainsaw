@@ -271,7 +271,7 @@ Container:CreateToggle({
 })
 
 local function tryPickupContainerItem(item)
-    if not item or not item:IsA("Model") or not item.PrimaryPart then
+    if not item then
         return
     end
 
