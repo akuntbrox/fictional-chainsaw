@@ -279,6 +279,13 @@ local function tryPickupContainerItem(item)
         return
     end
 
+    if item:IsA("Model") then
+        local primary = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+        if primary and primary:FindFirstChild("FlowerUI") then
+            return
+        end
+    end
+
     remote:FireServer(buffer.fromstring("\v"), buffer.fromstring("\254\1\0\6)" .. item.Name))
 end
 
