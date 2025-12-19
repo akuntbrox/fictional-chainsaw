@@ -271,7 +271,7 @@ Container:CreateToggle({
 })
 
 local function tryPickupContainerItem(item)
-    if not item then
+    if not item or typeof(item.Name) ~= "string" then
         return
     end
 
@@ -296,6 +296,12 @@ Container:CreateToggle({
         while _G.containeritems do
             for _, container in ipairs(containerHolder:GetChildren()) do
                 for _, item in ipairs(container:GetDescendants()) do
+                    tryPickupContainerItem(item)
+                end
+            end
+
+            if itemCache then
+                for _, item in ipairs(itemCache:GetChildren()) do
                     tryPickupContainerItem(item)
                 end
             end
