@@ -49,6 +49,8 @@ local containerMap = {
     ["RubyContainer"] = string.char(13) .. "RubyContainer",
     ["SapphireContainer"] = string.char(17) .. "SapphireContainer",
     ["SpaceContainer"] = string.char(14) .. "SpaceContainer",
+    ["VortexContainer"] = string.char(15) .. "VortexContainer",
+    ["BlackHoleContainer"] = string.char(18) .. "BlackHoleContainer",
     ["DeepSpaceContainer"] = string.char(18) .. "DeepSpaceContainer",
     ["ObisidianContainer"] = string.char(18) .. "ObisidianContainer",
     ["ChristmasContainer"] = string.char(18) .. "ChristmasContainer",
@@ -81,6 +83,8 @@ local containerOptions = {
     "RubyContainer",
     "SapphireContainer",
     "SpaceContainer",
+    "VortexContainer",
+    "BlackHoleContainer",
     "DeepSpaceContainer",
     "ObisidianContainer",
     "ChristmasContainer",
@@ -281,7 +285,7 @@ local function tryPickupContainerItem(item)
 
     if item:IsA("Model") then
         local primary = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-        if primary and primary:FindFirstChild("FlowerUI") then
+        if primary and (primary:FindFirstChild("FlowerUI") or primary:FindFirstChild("FlowerGui")) then
             return
         end
     end
