@@ -1,8 +1,19 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
-local remote = game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Shared"):WaitForChild("Warp"):WaitForChild("Index"):WaitForChild("Event"):WaitForChild("Reliable")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local remote = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shared"):WaitForChild("Warp"):WaitForChild("Index"):WaitForChild("Event"):WaitForChild("Reliable")
 local plr = Players.LocalPlayer
+local Controllers = ReplicatedStorage:WaitForChild("Controllers")
+local ModulesFolder = ReplicatedStorage:WaitForChild("Modules")
+local SharedModules = ModulesFolder:WaitForChild("Shared")
+local PlayerDataController = require(Controllers:WaitForChild("Data"):WaitForChild("PlayerDataController"))
+local PlotController = require(Controllers:WaitForChild("Plot"):WaitForChild("PlotController"))
+local NotificationController = require(Controllers:WaitForChild("UserInterface"):WaitForChild("NotificationController"))
+local Constants = require(SharedModules:WaitForChild("Constants"))
+local DataSets = require(SharedModules:WaitForChild("DataSets"))
+local Remotes = require(ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Remotes"))
 
 local name = plr.Name
 local plot = nil
@@ -101,6 +112,182 @@ local flowerOptions = {
     "GoodFlowerContainer"
 }
 
+local autoCollectEnabled = false
+local autoCollectConnection
+local autoCollectToggle
+
+local function isItemCollected(item)
+    if not item then
+        return true
+    end
+
+    local data = PlayerDataController and PlayerDataController.Data
+    local attributeName = Constants and Constants.ATTRIBUTE_NAMES and Constants.ATTRIBUTE_NAMES.PLOT_ITEM_UID
+
+    if not data or not attributeName then
+        return true
+    end
+
+    local uid = item:GetAttribute(attributeName)
+    if not uid then
+        return true
+    end
+
+    local itemEntry = data.Items and data.Items[uid]
+    if not itemEntry then
+        return true
+    end
+
+    return itemEntry.Collected
+end
+
+local function isInventoryFull()
+    local data = PlayerDataController and PlayerDataController.Data
+    if not data then
+        warn("Couldnt find profile for inventory check")
+        return true
+    end
+
+    local current = 0
+    for _, entry in data.Items do
+        if entry.PickedUp and entry.Collected and not entry.InVault then
+            current += 1
+        end
+    end
+
+    local upgradeSet = DataSets and DataSets.UpgradeDataSet
+    local upgradeIdentifier = upgradeSet
+        and upgradeSet.Upgrades
+        and upgradeSet.Upgrades.MaxInventoryItems
+        and upgradeSet.Upgrades.MaxInventoryItems.Identifier
+
+    if not upgradeSet or not upgradeIdentifier then
+        warn("Auto collect could not resolve MaxInventoryItems upgrade")
+        return true
+    end
+
+    local maxAmount = upgradeSet:GetAmountOfUpgradeValueFromTier(data, upgradeIdentifier)
+    if not maxAmount then
+        warn("Auto collect could not read maximum inventory amount")
+        return true
+    end
+
+    return current >= maxAmount
+end
+
+local function getUncollectedItems()
+    local plot = PlotController and PlotController.GetClientPlot and PlotController.GetClientPlot()
+    if not plot then
+        return nil
+    end
+
+    local logic = plot:FindFirstChild("PlotLogic")
+    if not logic then
+        return nil
+    end
+
+    local cache = logic:FindFirstChild("ItemCache")
+    if not cache then
+        return nil
+    end
+
+    local items = {}
+    for _, item in ipairs(cache:GetChildren()) do
+        if not isItemCollected(item) then
+            table.insert(items, item)
+        end
+    end
+
+    return items
+end
+
+local collectItemsInRange
+
+local function setAutoCollectState(value)
+    if autoCollectEnabled == value then
+        if not value and autoCollectConnection then
+            autoCollectConnection:Disconnect()
+            autoCollectConnection = nil
+        end
+        return
+    end
+
+    autoCollectEnabled = value
+
+    if value then
+        if not autoCollectConnection then
+            autoCollectConnection = RunService.RenderStepped:Connect(function()
+                if autoCollectEnabled and collectItemsInRange then
+                    collectItemsInRange()
+                end
+            end)
+        end
+    elseif autoCollectConnection then
+        autoCollectConnection:Disconnect()
+        autoCollectConnection = nil
+    end
+end
+
+local function stopAutoCollect()
+    setAutoCollectState(false)
+    if autoCollectToggle and typeof(autoCollectToggle.Set) == "function" then
+        autoCollectToggle:Set(false)
+    end
+end
+
+collectItemsInRange = function()
+    local items = getUncollectedItems()
+    if not items or #items == 0 then
+        return
+    end
+
+    if isInventoryFull() then
+        NotificationController.CreateTextNotification({
+            Text = "Inventory full. Auto collect disabled";
+            Color = Color3.fromRGB(255, 0, 4);
+            Duration = 5;
+            Sound = 14299265233;
+        })
+        stopAutoCollect()
+        return
+    end
+
+    local attributeName = Constants and Constants.ATTRIBUTE_NAMES and Constants.ATTRIBUTE_NAMES.PLOT_ITEM_UID
+    local baseDistance = Constants and Constants.ITEMS and Constants.ITEMS.STANDARD_PICKUP_PROX_DISTANCE or 12
+
+    if not attributeName then
+        return
+    end
+
+    for _, item in ipairs(items) do
+        local uid = item:GetAttribute(attributeName)
+        if uid then
+            local pivotCFrame
+            local ok, pivot = pcall(function()
+                return item:GetPivot()
+            end)
+            if ok then
+                pivotCFrame = pivot
+            elseif item:IsA("BasePart") then
+                pivotCFrame = item.CFrame
+            end
+
+            if pivotCFrame then
+                local data = PlayerDataController and PlayerDataController.Data
+                local entry = data and data.Items and data.Items[uid]
+                local maxDistance = baseDistance * ((entry and entry.Scale) or 1)
+                local success, distance = pcall(function()
+                    return plr:DistanceFromCharacter(pivotCFrame.Position)
+                end)
+
+                if success and distance < maxDistance then
+                    Remotes.Client.ITEM_REMOTES.TOSERVER_PICKUP_ITEM:Fire(true, uid)
+                end
+            end
+        end
+    end
+end
+
 local Window = Rayfield:CreateWindow({
     Name = "▶ Container RNG ◀",
     Icon = 0,
@@ -169,6 +356,14 @@ Tab:CreateToggle({
             end
             task.wait()
         end
+    end,
+})
+
+autoCollectToggle = Tab:CreateToggle({
+    Name = "Auto Collect (Skip Gamepass)",
+    CurrentValue = false,
+    Callback = function(Value)
+        setAutoCollectState(Value)
     end,
 })
 
@@ -274,6 +469,114 @@ Container:CreateToggle({
     end,
 })
 
+local flowerThingTargets
+local sellableZoneTarget
+
+local function getFlowerThingTargets()
+    local hasValidTargets = false
+    if flowerThingTargets and #flowerThingTargets > 0 then
+        hasValidTargets = true
+        for _, part in ipairs(flowerThingTargets) do
+            if not (part and part.Parent) then
+                hasValidTargets = false
+                break
+            end
+        end
+    end
+
+    if not hasValidTargets then
+        flowerThingTargets = {}
+
+        local gameplay = workspace:FindFirstChild("Gameplay")
+        local plots = gameplay and gameplay:FindFirstChild("Plots")
+        local specialPlot = plot or (plots and plots:FindFirstChild(tostring(plr.UserId)))
+        local plotDecor = specialPlot and specialPlot:FindFirstChild("PlotDecor")
+        local flowerGarden = plotDecor and plotDecor:FindFirstChild("FlowerGarden")
+
+        if flowerGarden then
+            for _, descendant in ipairs(flowerGarden:GetDescendants()) do
+                if descendant.Name == "FlowerThing" and descendant:IsA("BasePart") then
+                    table.insert(flowerThingTargets, descendant)
+                end
+            end
+        end
+    end
+
+    return flowerThingTargets or {}
+end
+
+local function getSellableZoneTarget()
+    if sellableZoneTarget and sellableZoneTarget.Parent then
+        return sellableZoneTarget
+    end
+
+    local gameplay = workspace:FindFirstChild("Gameplay")
+    local plots = gameplay and gameplay:FindFirstChild("Plots")
+    local targetPlot = plot or (plots and plots:FindFirstChild(tostring(plr.UserId)))
+    local plotLogic = targetPlot and targetPlot:FindFirstChild("PlotLogic")
+    local zones = plotLogic and plotLogic:FindFirstChild("Zones")
+
+    sellableZoneTarget = zones and zones:FindFirstChild("SellableZone") or nil
+    return sellableZoneTarget
+end
+
+local function getItemPosition(item)
+    if not item then
+        return nil
+    end
+
+    if item:IsA("Model") then
+        local ok, pivot = pcall(function()
+            return item:GetPivot()
+        end)
+        if ok and pivot then
+            return pivot.Position
+        end
+
+        local primary = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+        if primary then
+            return primary.Position
+        end
+    elseif item:IsA("BasePart") then
+        return item.Position
+    end
+
+    return nil
+end
+
+local function isPointInsidePart(part, position)
+    if not (part and part:IsA("BasePart") and position) then
+        return false
+    end
+
+    local relative = part.CFrame:PointToObjectSpace(position)
+    local halfSize = part.Size * 0.5
+
+    return
+        math.abs(relative.X) <= halfSize.X and
+        math.abs(relative.Y) <= halfSize.Y and
+        math.abs(relative.Z) <= halfSize.Z
+end
+
+local function isWhitelistedFlowerItem(item)
+    local itemPosition = getItemPosition(item)
+    if not itemPosition then
+        return false
+    end
+
+    for _, flowerPart in ipairs(getFlowerThingTargets()) do
+        if isPointInsidePart(flowerPart, itemPosition) then
+            return true
+        end
+    end
+
+    if isPointInsidePart(getSellableZoneTarget(), itemPosition) then
+        return true
+    end
+
+    return false
+end
+
 local function tryPickupContainerItem(item)
     if not item or typeof(item.Name) ~= "string" then
         return
@@ -283,11 +586,8 @@ local function tryPickupContainerItem(item)
         return
     end
 
-    if item:IsA("Model") then
-        local primary = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-        if primary and (primary:FindFirstChild("FlowerUI") or primary:FindFirstChild("FlowerGui")) then
-            return
-        end
+    if isWhitelistedFlowerItem(item) then
+        return
     end
 
     remote:FireServer(buffer.fromstring("\v"), buffer.fromstring("\254\1\0\6)" .. item.Name))
